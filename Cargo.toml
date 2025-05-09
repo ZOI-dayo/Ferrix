@@ -5,3 +5,4 @@ edition = "2024"
 
 [dependencies]
 libc = "0.2.172"
+tun-tap = "0.1.4"
