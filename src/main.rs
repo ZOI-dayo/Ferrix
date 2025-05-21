@@ -1,11 +1,166 @@
+use std::fmt::{Display, Formatter};
 use std::process::Command;
-// use std::io::{BufRead, BufReader, Write};
-// use std::net::{TcpListener, TcpStream};
 use tun_tap::Iface;
 
-// const TUNSETIFF: c_int = 0x400454CA;
-// const IFF_TUN: c_short = 0x0001;
-// const IFF_NO_PI: c_short = 0x1000;
+enum EtherType {
+    IPv4,
+    ARP,
+    IPv6,
+}
+
+impl EtherType {
+    fn from(raw: [u8; 2]) -> EtherType {
+        match raw {
+            [0x08, 0x00] => EtherType::IPv4,
+            [0x08, 0x06] => EtherType::ARP,
+            [0x86, 0xdd] => EtherType::IPv6,
+            _ => todo!(),
+        }
+    }
+}
+
+impl Display for EtherType {
+    fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
+        write!(
+            f,
+            "{}",
+            match self {
+                EtherType::IPv4 => "IPv4",
+                EtherType::ARP => "ARP",
+                EtherType::IPv6 => "IPv6",
+            }
+        )
+    }
+}
+
+struct MacAddress {
+    address: [u8; 6],
+}
+
+impl Display for MacAddress {
+    fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
+        write!(
+            f,
+            "mac({:02x?}:{:02x?}:{:02x?}:{:02x?}:{:02x?}:{:02x?})",
+            self.address[0],
+            self.address[1],
+            self.address[2],
+            self.address[3],
+            self.address[4],
+            self.address[5]
+        )
+    }
+}
+
+struct IPv4Address {
+    address: [u8; 4],
+}
+
+impl Display for IPv4Address {
+    fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
+        write!(
+            f,
+            "ipv4({}.{}.{}.{})",
+            self.address[0], self.address[1], self.address[2], self.address[3]
+        )
+    }
+}
+
+trait ProtocolHeader<T> {
+    fn decode(raw: &Vec<u8>) -> T;
+    fn length(&self) -> usize;
+}
+
+struct EthernetHeader {
+    destination: MacAddress,
+    source: MacAddress,
+    ether_type: EtherType,
+}
+
+impl ProtocolHeader<EthernetHeader> for EthernetHeader {
+    fn decode(raw: &Vec<u8>) -> EthernetHeader {
+        EthernetHeader {
+            destination: MacAddress {
+                address: raw[0..6].try_into().unwrap(),
+            },
+            source: MacAddress {
+                address: raw[6..12].try_into().unwrap(),
+            },
+            ether_type: EtherType::from(raw[12..14].try_into().unwrap()),
+        }
+    }
+    fn length(&self) -> usize {
+        14
+    }
+}
+
+impl Display for EthernetHeader {
+    fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
+        write!(
+            f,
+            "Ethernet {{ dest: {}, src: {}, type: {} }}",
+            self.destination, self.source, self.ether_type
+        )
+    }
+}
+
+struct ArpHeader {
+    htype: usize,
+    ptype: EtherType,
+    hlen: usize,
+    plen: usize,
+    oper: usize,
+    sha: MacAddress,
+    spa: IPv4Address,
+    tha: MacAddress,
+    tpa: IPv4Address,
+}
+
+impl ProtocolHeader<ArpHeader> for ArpHeader {
+    fn decode(raw: &Vec<u8>) -> ArpHeader {
+        ArpHeader {
+            htype: usize::from(raw[0]) * 16 + usize::from(raw[1]),
+            ptype: EtherType::from(raw[2..4].try_into().unwrap()),
+            hlen: usize::from(raw[4]),
+            plen: usize::from(raw[5]),
+            oper: usize::from(raw[6]) * 16 + usize::from(raw[7]),
+            sha: MacAddress {
+                address: raw[8..14].try_into().unwrap(),
+            },
+            spa: IPv4Address {
+                address: raw[14..18].try_into().unwrap(),
+            },
+            tha: MacAddress {
+                address: raw[18..24].try_into().unwrap(),
+            },
+            tpa: IPv4Address {
+                address: raw[24..28].try_into().unwrap(),
+            },
+        }
+    }
+
+    fn length(&self) -> usize {
+        28
+    }
+}
+
+impl Display for ArpHeader {
+    fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
+        write!(
+            f,
+            "ARP {{ HTYPE: {}, PTYPE: {}, HLEN: {}, PLEN: {}, OPER: {}, SHA: {}, SPA: {}, THA: {}, TPA: {} }}",
+            self.htype,
+            self.ptype,
+            self.hlen,
+            self.plen,
+            self.oper,
+            self.sha,
+            self.spa,
+            self.tha,
+            self.tpa
+        )
+    }
+}
 
 fn main() {
     println!("Hello, world!");
@@ -43,158 +198,41 @@ fn main() {
         let len = iface.recv(&mut data).expect("failed to receive data");
         println!("---");
         // println!("{}, {:x?}", len, &data[0..len]);
+        let mut loc: usize = 0;
         println!("begin: {:x?}", &data[0..4]);
-        println!("dest mac: {:x?}", &data[4..10]);
-        println!("src mac: {:x?}", &data[10..16]);
-        println!("EtherType: {:x?}", &data[16..18]);
-        println!("Payload: {:x?}", &data[18..len - 4]);
-        // decode ipv6 packet
-        {
-            println!("  version: {:x?}", &data[18] | 0b11110000);
-            // println!(
-            //     "  trafic class: {:x?}",
-            //     (&data[19] | 0b00001111) as i64 * 256 + (&data[20] | 0b11110000) as i64
-            // );
-            // println!("  flow label")
-            println!("  payload len: {:x?}", &data[22..24]);
-            println!("  nxt header: {:x?}", &data[24]);
-            println!("  hop limit: {:x?}", &data[25]);
-            println!("  src addr: {:x?}", &data[26..42]);
-            println!("  dst addr: {:x?}", &data[42..58]);
-            println!("  content: {:x?}", &data[58..len])
-            // todo: decode ndp packet
+        loc += 4;
+        let ethernet_header = EthernetHeader::decode(&data[loc..].to_owned());
+        loc += ethernet_header.length();
+        println!("Ethernet Header: {}", ethernet_header);
+
+        println!("Payload: {:x?}", &data[18..len]);
+        match ethernet_header.ether_type {
+            EtherType::ARP => {
+                let arp_header = ArpHeader::decode(&data[loc..].to_owned());
+                loc += arp_header.length();
+                println!("ARP Header: {}", arp_header);
+            }
+            EtherType::IPv4 => {
+                todo!()
+            }
+            EtherType::IPv6 => {
+                println!("  version: {:x?}", &data[18] | 0b11110000);
+                // println!(
+                //     "  trafic class: {:x?}",
+                //     (&data[19] | 0b00001111) as i64 * 256 + (&data[20] | 0b11110000) as i64
+                // );
+                // println!("  flow label")
+                println!("  payload len: {:x?}", &data[22..24]);
+                println!("  nxt header: {:x?}", &data[24]);
+                println!("  hop limit: {:x?}", &data[25]);
+                println!("  src addr: {:x?}", &data[26..42]);
+                println!("  dst addr: {:x?}", &data[42..58]);
+                if 58 < len {
+                    println!("  content: {:x?}", &data[58..len])
+                }
+                // todo: decode ndp packet
+                todo!()
+            }
         }
     }
-
-    // let tun_path = Path::new("/dev/net/tun");
-    // unsafe {
-    //     fcntl(
-    //         tun_path.as_os_str().as_bytes().as_ptr() as i32,
-    //         TUNSETIFF,
-    //         libc::ifreq {
-    //             ifr_name: [
-    //                 b'e' as c_char,
-    //                 b't' as c_char,
-    //                 b'h' as c_char,
-    //                 b'0' as c_char,
-    //                 0,
-    //                 0,
-    //                 0,
-    //                 0,
-    //                 0,
-    //                 0,
-    //                 0,
-    //                 0,
-    //                 0,
-    //                 0,
-    //                 0,
-    //                 0,
-    //             ],
-    //             ifr_ifru: __c_anonymous_ifr_ifru {
-    //                 ifru_flags: IFF_NO_PI | IFF_TUN,
-    //             },
-    //         },
-    //     );
-    // }
-    // let mut file = match File::open(&tun_path) {
-    //     Err(why) => panic!("couldn't open {}: {}", tun_path.display(), why),
-    //     Ok(file) => file,
-    // };
-    // println!(
-    //     "{}",
-    //     String::from_utf8(
-    //         Command::new("sh")
-    //             .arg("-c")
-    //             .arg("ip a")
-    //             .output()
-    //             .expect("failed to execute process")
-    //             .stdout
-    //     )
-    //     .unwrap()
-    // );
-    //
-    // println!(
-    //     "{}",
-    //     String::from_utf8(
-    //         Command::new("sh")
-    //             .arg("-c")
-    //             .arg("ip tuntap add dev tun0 mode tun")
-    //             .output()
-    //             .expect("failed to execute process")
-    //             .stdout
-    //     )
-    //         .unwrap()
-    // );
-    // println!(
-    //     "{:?}",
-    //     Command::new("sh")
-    //         .arg("-c")
-    //         .arg("ip link set tun0 up")
-    //         .output()
-    //         .expect("failed to execute process")
-    // );
-    // println!(
-    //     "{:?}",
-    //     Command::new("sh")
-    //         .arg("-c")
-    //         .arg("ip addr add 192.168.0.1/24 dev tun0")
-    //         .output()
-    //         .expect("failed to execute process")
-    // );
-    // println!(
-    //     "{}",
-    //     String::from_utf8(
-    //         Command::new("sh")
-    //             .arg("-c")
-    //             .arg("ip a")
-    //             .output()
-    //             .expect("failed to execute process")
-    //             .stdout
-    //     )
-    //     .unwrap()
-    // );
-    // let mut data: Vec<u8> = vec![0; 1500];
-    // loop {
-    //     let tun = file
-    //         .read_to_end(&mut data)
-    //         .expect("failed to read tun data");
-    //     println!("Read {} bytes from tun0", tun);
-    //     println!("Content: {:?}", String::from_utf8_lossy(&data));
-    // }
-
-    // let listener = TcpListener::bind("0.0.0.0:80").unwrap();
-    // for stream in listener.incoming() {
-    //     let stream = stream.unwrap();
-    //     handle_connection(stream);
-    // }
 }
-
-// fn handle_connection(mut stream: TcpStream) {
-//     let mut packet = BufReader::new(&stream);
-//     let mut buffer: Vec<u8> = Vec::new();
-//     loop {
-//         let mut temp_buffer: Vec<u8> = Vec::new();
-//         packet.read_until(b'\n', &mut temp_buffer).unwrap();
-//         if temp_buffer.is_empty() {
-//             // No more data to read
-//             break;
-//         }
-//         buffer.extend_from_slice(&temp_buffer);
-//         if temp_buffer.len() == 2 && temp_buffer == b"\r\n" {
-//             // End of headers
-//             // TODO: read content
-//             break;
-//         }
-//         println!("Request: {:?}", temp_buffer.clone());
-//         println!("Request: {}", String::from_utf8(buffer.clone()).unwrap());
-//     }
-//     println!("Request: {}", String::from_utf8(buffer).unwrap());
-//     let response_body = "Hello, world!";
-//     let response = format!(
-//         "HTTP/1.1 200 OK\r\nContent-Length: {}\r\n\r\n{}",
-//         response_body.len(),
-//         response_body
-//     );
-//     stream.write_all(response.as_bytes()).unwrap();
-//     stream.flush().unwrap();
-// }
