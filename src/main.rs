@@ -1,236 +1,20 @@
-use std::fmt::{Display, Formatter};
 use std::process::Command;
 use tun_tap::Iface;
 
-struct ByteStream {
-    data: Vec<u8>,
-    pos: usize,
-}
+mod byte_stream;
+mod byte_object;
+mod ether_type;
+mod mac_address;
+mod ipv4_address;
+mod ethernet_header;
+mod arp_header;
 
-impl ByteStream {
-    fn pop(&mut self, len: usize) -> &[u8] {
-        let res = &self.data[self.pos..(self.pos + len)];
-        self.pos += len;
-        res
-    }
-    fn append(&mut self, data: &[u8]) -> usize {
-        self.data.extend_from_slice(data);
-        self.data.len()
-    }
-}
-
-// impl From<Vec<u8>> for ByteStream<'_> {
-//     fn from(value: Vec<u8>) -> Self {
-//         ByteStream {
-//             data: value,
-//             pos: 0,
-//         }
-//     }
-// }
-
-trait ByteObject {
-    fn from_bytes(src: &mut ByteStream) -> Self;
-    fn append_to(&self, dst: &mut ByteStream) -> usize;
-}
-
-enum EtherType {
-    IPv4,
-    ARP,
-    IPv6,
-}
-
-impl ByteObject for EtherType {
-    fn from_bytes(stream: &mut ByteStream) -> EtherType {
-        let raw = stream.pop(2);
-        match raw {
-            [0x08, 0x00] => EtherType::IPv4,
-            [0x08, 0x06] => EtherType::ARP,
-            [0x86, 0xdd] => EtherType::IPv6,
-            _ => panic!("raw.len = {}, raw 1 = {}, raw 2 = {}", raw.len(), raw[0], raw[1]),
-        }
-    }
-    fn append_to(&self, dst: &mut ByteStream) -> usize {
-        let content: &[u8] = match self {
-            EtherType::IPv4 => &[0x08, 0x00],
-            EtherType::ARP => &[0x08, 0x06],
-            EtherType::IPv6 => &[0x86, 0xdd],
-        };
-        dst.append(content);
-        content.len()
-    }
-}
-
-impl Display for EtherType {
-    fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
-        write!(
-            f,
-            "{}",
-            match self {
-                EtherType::IPv4 => "IPv4",
-                EtherType::ARP => "ARP",
-                EtherType::IPv6 => "IPv6",
-            }
-        )
-    }
-}
-
-struct MacAddress {
-    address: [u8; 6],
-}
-
-impl ByteObject for MacAddress {
-    fn from_bytes(src: &mut ByteStream) -> Self {
-        MacAddress {
-            address: src.pop(6).try_into().unwrap(),
-        }
-    }
-
-    fn append_to(&self, dst: &mut ByteStream) -> usize {
-        dst.append(&self.address);
-        6
-    }
-}
-
-impl Display for MacAddress {
-    fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
-        write!(
-            f,
-            "mac({:02x?}:{:02x?}:{:02x?}:{:02x?}:{:02x?}:{:02x?})",
-            self.address[0],
-            self.address[1],
-            self.address[2],
-            self.address[3],
-            self.address[4],
-            self.address[5]
-        )
-    }
-}
-
-struct IPv4Address {
-    address: [u8; 4],
-}
-
-impl ByteObject for IPv4Address {
-    fn from_bytes(stream: &mut ByteStream) -> Self {
-        IPv4Address {
-            address: stream.pop(4).try_into().unwrap(),
-        }
-    }
-
-    fn append_to(&self, dst: &mut ByteStream) -> usize {
-        dst.append(&self.address);
-        4
-    }
-}
-
-impl Display for IPv4Address {
-    fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
-        write!(
-            f,
-            "ipv4({}.{}.{}.{})",
-            self.address[0], self.address[1], self.address[2], self.address[3]
-        )
-    }
-}
-
-struct EthernetHeader {
-    destination: MacAddress,
-    source: MacAddress,
-    ether_type: EtherType,
-}
-
-impl ByteObject for EthernetHeader {
-    fn from_bytes(stream: &mut ByteStream) -> EthernetHeader {
-        EthernetHeader {
-            destination: MacAddress::from_bytes(stream),
-            source: MacAddress::from_bytes(stream),
-            ether_type: EtherType::from_bytes(stream),
-        }
-    }
-
-    fn append_to(&self, dst: &mut ByteStream) -> usize {
-        self.destination.append_to(dst)
-            + self.source.append_to(dst)
-            + self.ether_type.append_to(dst)
-    }
-}
-
-impl Display for EthernetHeader {
-    fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
-        write!(
-            f,
-            "Ethernet {{ dest: {}, src: {}, type: {} }}",
-            self.destination, self.source, self.ether_type
-        )
-    }
-}
-
-struct ArpHeader {
-    htype: usize,
-    ptype: EtherType,
-    hlen: usize,
-    plen: usize,
-    oper: usize,
-    sha: MacAddress,
-    spa: IPv4Address,
-    tha: MacAddress,
-    tpa: IPv4Address,
-}
-
-fn bytes_to_int(raw: &[u8]) -> usize {
-    let mut res: usize = 0;
-    for x in raw {
-        res *= 16;
-        res += x.to_owned() as usize;
-    }
-    res
-}
-
-impl ByteObject for ArpHeader {
-    fn from_bytes(stream: &mut ByteStream) -> Self {
-        ArpHeader {
-            htype: bytes_to_int(stream.pop(2)),
-            ptype: EtherType::from_bytes(stream),
-            hlen: bytes_to_int(stream.pop(1)),
-            plen: bytes_to_int(stream.pop(1)),
-            oper: bytes_to_int(stream.pop(2)),
-            sha: MacAddress::from_bytes(stream),
-            spa: IPv4Address::from_bytes(stream),
-            tha: MacAddress::from_bytes(stream),
-            tpa: IPv4Address::from_bytes(stream),
-        }
-    }
-
-    fn append_to(&self, dst: &mut ByteStream) -> usize {
-        dst.append(&self.htype.to_be_bytes())
-            + self.ptype.append_to(dst)
-            + dst.append(&self.hlen.to_be_bytes())
-            + dst.append(&self.plen.to_be_bytes())
-            + dst.append(&self.oper.to_be_bytes())
-            + self.sha.append_to(dst)
-            + self.spa.append_to(dst)
-            + self.tha.append_to(dst)
-            + self.tpa.append_to(dst)
-    }
-}
-
-impl Display for ArpHeader {
-    fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
-        write!(
-            f,
-            "ARP {{ HTYPE: {}, PTYPE: {}, HLEN: {}, PLEN: {}, OPER: {}, SHA: {}, SPA: {}, THA: {}, TPA: {} }}",
-            self.htype,
-            self.ptype,
-            self.hlen,
-            self.plen,
-            self.oper,
-            self.sha,
-            self.spa,
-            self.tha,
-            self.tpa
-        )
-    }
-}
+use byte_stream::ByteStream;
+use byte_object::ByteObject;
+use ether_type::EtherType;
+use ipv4_address::IPv4Address;
+use ethernet_header::EthernetHeader;
+use arp_header::ArpHeader;
 
 fn main() {
     println!("Hello, world!");
@@ -288,8 +72,8 @@ fn main() {
                     hlen: 6,
                     plen: 4,
                     oper: 2,
-                    sha: arp_header.tha, // TODO
-                    spa: arp_header.spa, // TODO
+                    sha: arp_header.tha,
+                    spa: arp_header.spa,
                     tha: arp_header.sha,
                     tpa: IPv4Address {
                         address: [1, 2, 3, 4],
@@ -334,7 +118,7 @@ fn main() {
             }
             EtherType::IPv4 => {
                 // todo!()
-                println!("ipv4 is not implemented");
+                println!("IPv4は未実装である");
             }
             EtherType::IPv6 => {
                 println!("  version: {:x?}", &data[18] | 0b11110000);
@@ -351,8 +135,8 @@ fn main() {
                 if 58 < len {
                     println!("  content: {:x?}", &data[58..len])
                 }
-                // todo: decode ndp packet
-                println!("ipv6 is not implemented")
+                // NDPパケットのデコードは未実装
+                println!("IPv6は未実装である")
             }
         }
     }
