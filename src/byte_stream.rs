@@ -36,9 +36,9 @@ impl ByteStream {
     /// * `data` - 追加するバイトデータのスライス。
     ///
     /// # 戻り値
-    /// データ追加後のストリームの全長。
+    /// 追加されたバイト数。
     pub fn append(&mut self, data: &[u8]) -> usize {
         self.data.extend_from_slice(data);
-        self.data.len()
+        data.len()
     }
 }
