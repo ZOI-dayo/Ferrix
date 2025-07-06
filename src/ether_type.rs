@@ -10,6 +10,7 @@ use crate::byte_object::ByteObject;
 /// イーサネットフレームのペイロードタイプを表す列挙型。
 ///
 /// サポートされるタイプは IPv4, ARP, IPv6 である。
+#[derive(Debug)]
 pub enum EtherType {
     IPv4,
     ARP,

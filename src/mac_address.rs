@@ -10,6 +10,7 @@ use crate::byte_object::ByteObject;
 /// MACアドレスを表す構造体。
 ///
 /// 6バイトの配列でMACアドレスを保持する。
+#[derive(Clone)]
 pub struct MacAddress {
     pub address: [u8; 6],
 }
