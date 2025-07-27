@@ -2,6 +2,7 @@ use std::fmt::{Display, Formatter};
 use crate::bit_stream::{BitStream, BitUtils};
 use crate::byte_object::ByteObject;
 
+#[derive(Clone)]
 pub struct IPv4Address {
     pub address: [u8; 4],
 }

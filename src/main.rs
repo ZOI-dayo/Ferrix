@@ -1,11 +1,18 @@
-use std::{net::Ipv4Addr};
+use etherparse::{PacketBuilder, err::ip};
+use std::net::Ipv4Addr;
 use tokio_tun::Tun;
 
-use crate::{bit_stream::{BitStream, BitUtils}, byte_object::ByteObject, ipv4_header::IPv4Header};
+use crate::{
+    bit_stream::{BitStream, BitUtils},
+    byte_object::ByteObject,
+    ipv4_address::IPv4Address,
+    ipv4_header::IPv4Header,
+    tcp_header::TcpHeader,
+};
 
 // mod arp_header;
-mod byte_object;
 mod bit_stream;
+mod byte_object;
 // mod ether_type;
 // mod ethernet_header;
 mod ipv4_address;
@@ -13,6 +20,7 @@ mod ipv4_header;
 // mod ipv6_address;
 // mod ipv6_header;
 // mod mac_address;
+mod tcp_header;
 
 #[tokio::main]
 async fn main() {
@@ -48,26 +56,83 @@ async fn main() {
         };
         println!("reading {} bytes from tun: {:?}", buf.len(), buf);
 
-        if let Err(e) = handle_packet(buf).await {
+        if let Err(e) = handle_packet(buf, tun).await {
             eprintln!("Error handling packet: {}", e);
         }
     }
 }
 
-async fn handle_packet(buf: &[u8]) -> Result<(), Box<dyn std::error::Error>> {
-    println!("{:?}", buf.iter().map(|b| format!("{:02x}", b)).collect::<Vec<_>>());
+async fn handle_packet(buf: &[u8], tun: &Tun) -> Result<(), Box<dyn std::error::Error>> {
+    println!(
+        "{:?}",
+        buf.iter().map(|b| format!("{:02x}", b)).collect::<Vec<_>>()
+    );
     let mut stream = BitStream::new(&BitUtils::u8s_to_bits(buf));
-    match BitUtils::bits_to_u8(stream.view(4))  {
+    match BitUtils::bits_to_u8(stream.view(4)) {
         4 => {
             println!("IPv4 Packet Detected");
-            let header = IPv4Header::from_bytes(&mut stream);
-            println!("IPv4 Header: {}", header);
+            let ipv4_header = IPv4Header::from_bytes(&mut stream);
+            println!("IPv4 Header: {}", ipv4_header);
+            match ipv4_header.protocol {
+                6 => {
+                    println!("TCP Packet Detected");
+                    let tcp_header = TcpHeader::from_bytes(&mut stream);
+                    println!("TCP Header: {}", tcp_header);
+                    let payload_bytes = BitUtils::bits_to_u8s(&stream.bits);
+                    println!("{:?}, {:?}, {:?}", BitUtils::bits_to_u8s(&stream.bits), payload_bytes, String::from_utf8_lossy(&payload_bytes[..]));
+                    if (tcp_header.flags & 0b00000010 != 0) {
+                        println!("TCP SYN Packet Detected");
+                        send_syn_ack(
+                            ipv4_header.destination_address.address,
+                            ipv4_header.source_address.address,
+                            tcp_header.destination_port,
+                            tcp_header.source_port,
+                            tcp_header.sequence_number,
+                            tun,
+                        )
+                        .await?;
+                    } else if tcp_header.destination_port == 80 {
+                        println!("HTTP Packet Detected");
+                        // send_http_response(
+                        //     ipv4_header.source_address,
+                        //     ipv4_header.destination_address,
+                        //     tcp_header.source_port,
+                        //     tcp_header.destination_port,
+                        //     tcp_header.acknowledgment_number,
+                        //     tcp_header.sequence_number,
+                        //     tun,
+                        // )
+                        // .await?;
+                        send_http_response(
+                            ipv4_header.source_address.address,
+                            ipv4_header.destination_address.address,
+                            tcp_header.source_port,
+                            tcp_header.destination_port,
+                            tcp_header.acknowledgment_number,
+                            tcp_header.sequence_number,
+                            tun,
+                        ).await?;
+                    }
+                }
+                17 => {
+                    println!("UDP Packet Detected");
+                    todo!("Handle UDP packet");
+                }
+                _ => {
+                    println!("Unknown Protocol: {}", ipv4_header.protocol);
+                    return Ok(());
+                }
+            }
         }
         6 => {
             println!("IPv6 Packet Detected");
+            // todo!("Handle IPv6 packet");
         }
         _ => {
-            println!("Unknown Packet Type: {:?} {}", stream.view(4), BitUtils::bits_to_u8(stream.view(4)));
+            println!(
+                "Unknown Packet Type: {}",
+                BitUtils::bits_to_u8(stream.view(4))
+            );
             return Ok(());
         }
     }
@@ -100,6 +165,134 @@ async fn handle_packet(buf: &[u8]) -> Result<(), Box<dyn std::error::Error>> {
     // Ok(())
 }
 
-fn format_ip(ip: [u8; 4]) -> String {
-    format!("{}.{}.{}.{}", ip[0], ip[1], ip[2], ip[3])
+async fn send_http_response(
+    src_ip: [u8; 4],
+    dest_ip: [u8; 4],
+    src_port: u16, 
+    dest_port: u16,
+    seq_num: u32,
+    ack_num: u32,
+    tun: &Tun
+) -> Result<(), Box<dyn std::error::Error>> {
+    let http_response = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: 52\r\nConnection: close\r\n\r\n<html><body><h1>Hello from Ferrix!</h1></body></html>";
+
+    let builder = PacketBuilder::ipv4(dest_ip, src_ip, 64)
+        .tcp(dest_port, src_port, ack_num, (seq_num + 1) as u16)
+        .ack(seq_num + 1)
+        .fin(); // FINフラグを追加して接続を終了
+
+    let mut response = Vec::new();
+    builder.write(&mut response, http_response.as_bytes())?;
+
+    tun.send(&response).await?;
+    println!("Sent HTTP response with FIN");
+    Ok(())
+}
+
+/*
+async fn send_http_response(
+    dest_ip: IPv4Address,
+    src_ip: IPv4Address,
+    dest_port: u16,
+    src_port: u16,
+    ack_num: u32,
+    seq_num: u32,
+    tun: &Tun,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut response = BitStream::new(&mut Vec::new());
+
+    let http_response = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: 52\r\nConnection: close\r\n\r\n<html><body><h1>Hello from Ferrix!</h1></body></html>";
+
+    let mut tcp_header = TcpHeader {
+        source_port: src_port,
+        destination_port: dest_port,
+        sequence_number: ack_num,
+        acknowledgment_number: seq_num + 1,
+        data_offset: 5, // 5 * 4 = 20 bytes
+        reserved: 0,
+        flags: 0b00010001,  // ACK + FIN flag
+        window_size: 65535, // Maximum window size
+        checksum: 0,        // Placeholder for checksum
+        urgent_pointer: 0,
+    };
+    tcp_header.update_checksum(&src_ip, &dest_ip, http_response.as_bytes());
+
+    // Calculate total length: IPv4 header (20 bytes) + TCP header (20 bytes) + HTTP data
+    let ipv4_header_size = 20u16; // IHL = 5, so 5 * 4 = 20 bytes
+    let tcp_header_size = 20u16; // Data offset = 5, so 5 * 4 = 20 bytes
+    let http_data_size = http_response.len() as u16;
+    let total_length = ipv4_header_size + tcp_header_size + http_data_size;
+
+    let mut ipv4_header = IPv4Header {
+        version: 4,
+        ihl: 5,
+        dscp: 0,
+        ecn: 0,
+        total_length,
+        identification: 0,
+        flags: 2,
+        fragment_offset: 0,
+        ttl: 64,
+        protocol: 6,
+        header_checksum: 0,
+        source_address: src_ip.clone(),
+        destination_address: dest_ip.clone(),
+    };
+    ipv4_header.update_checksum();
+
+    ipv4_header.append_to(&mut response);
+    tcp_header.append_to(&mut response);
+    response.append(&BitUtils::u8s_to_bits(http_response.as_bytes()));
+
+    // tun.send(&BitUtils::bits_to_u8s(&response.bits)).await?;
+    println!(
+        "{:?}",
+        &BitUtils::bits_to_u8s(&response.bits)
+            .iter()
+            .map(|b| format!("{:02x}", b))
+            .collect::<Vec<_>>()
+    );
+    println!("Sent HTTP response with FIN");
+
+    //
+
+    let builder = PacketBuilder::ipv4(src_ip.address, dest_ip.address, 64)
+        .tcp(src_port, dest_port, ack_num, (seq_num + 1) as u16)
+        .ack(seq_num + 1)
+        .fin(); // FINフラグを追加して接続を終了
+
+    let mut response = Vec::new();
+    builder.write(&mut response, http_response.as_bytes())?;
+    println!(
+        "{:?}",
+        &response
+            .iter()
+            .map(|b| format!("{:02x}", b))
+            .collect::<Vec<_>>()
+    );
+    tun.send(&response).await?;
+
+    Ok(())
+}
+    */
+
+async fn send_syn_ack(
+    src_ip: [u8; 4],
+    dest_ip: [u8; 4],
+    src_port: u16,
+    dest_port: u16,
+    seq_num: u32,
+    tun: &Tun,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let builder = PacketBuilder::ipv4(dest_ip, src_ip, 64)
+        .tcp(dest_port, src_port, 12345, (seq_num + 1) as u16)
+        .syn()
+        .ack(seq_num + 1);
+
+    let mut response = Vec::new();
+    builder.write(&mut response, &[])?;
+
+    tun.send(&response).await?;
+    println!("Sent SYN-ACK response");
+    Ok(())
 }

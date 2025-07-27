@@ -1,7 +1,6 @@
 use crate::bit_stream::{BitStream, BitUtils};
 use crate::byte_object::ByteObject;
 use crate::ipv4_address::IPv4Address;
-use std::error::Error;
 use std::fmt::{Display, Formatter};
 
 pub struct IPv4Header {
@@ -74,6 +73,69 @@ impl ByteObject for IPv4Header {
         total_len += self.source_address.append_to(dst);
         total_len += self.destination_address.append_to(dst);
         total_len
+    }
+}
+
+impl IPv4Header {
+    /// IPv4ヘッダのチェックサムを計算する
+    /// RFC 791に従って、ヘッダの16ビット単位の1の補数の和を計算する
+    pub fn calculate_checksum(&self) -> u16 {
+        let mut sum: u32 = 0;
+        
+        // Version (4 bits) + IHL (4 bits) + DSCP (6 bits) + ECN (2 bits)
+        let version_ihl = ((self.version as u16) << 4) | (self.ihl as u16);
+        let dscp_ecn = ((self.dscp as u16) << 2) | (self.ecn as u16);
+        let first_word = (version_ihl << 8) | dscp_ecn;
+        sum += first_word as u32;
+        
+        // Total Length
+        sum += self.total_length as u32;
+        
+        // Identification
+        sum += self.identification as u32;
+        
+        // Flags (3 bits) + Fragment Offset (13 bits)
+        let flags_fragment = ((self.flags as u16) << 13) | (self.fragment_offset & 0x1FFF);
+        sum += flags_fragment as u32;
+        
+        // TTL + Protocol
+        let ttl_protocol = ((self.ttl as u16) << 8) | (self.protocol as u16);
+        sum += ttl_protocol as u32;
+        
+        // Header Checksum フィールドは0として計算
+        // sum += 0;
+        
+        // Source Address (32 bits = 2 x 16 bits)
+        let src_bytes = &self.source_address.address;
+        let src_word1 = ((src_bytes[0] as u16) << 8) | (src_bytes[1] as u16);
+        let src_word2 = ((src_bytes[2] as u16) << 8) | (src_bytes[3] as u16);
+        sum += src_word1 as u32;
+        sum += src_word2 as u32;
+        
+        // Destination Address (32 bits = 2 x 16 bits)
+        let dst_bytes = &self.destination_address.address;
+        let dst_word1 = ((dst_bytes[0] as u16) << 8) | (dst_bytes[1] as u16);
+        let dst_word2 = ((dst_bytes[2] as u16) << 8) | (dst_bytes[3] as u16);
+        sum += dst_word1 as u32;
+        sum += dst_word2 as u32;
+        
+        // キャリーを加算
+        while (sum >> 16) != 0 {
+            sum = (sum & 0xFFFF) + (sum >> 16);
+        }
+        
+        // 1の補数を取る
+        !sum as u16
+    }
+    
+    /// チェックサムが正しいかどうかを検証する
+    pub fn verify_checksum(&self) -> bool {
+        self.calculate_checksum() == self.header_checksum
+    }
+    
+    /// チェックサムを再計算して更新する
+    pub fn update_checksum(&mut self) {
+        self.header_checksum = self.calculate_checksum();
     }
 }
 
