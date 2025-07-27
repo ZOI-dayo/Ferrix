@@ -3,6 +3,7 @@ use tokio_tun::Tun;
 
 mod protocols;
 mod types;
+mod http;
 
 use crate::protocols::ip::ipv4_address::IPv4Address;
 use crate::protocols::ip::ipv4_header::IPv4Header;
@@ -11,10 +12,17 @@ use crate::protocols::tcp::tcp_header::TcpHeader;
 use crate::types::bit_stream::{BitStream, Bits, BitsCompatible};
 use crate::types::byte_object::ByteObject;
 
+use crate::http::request::HttpRequest;
+use crate::http::response::HttpResponse;
+use crate::http::server::FileServer;
+
 #[tokio::main]
 async fn main() {
     // --- サーバーの起動 ---
     println!("Hello, world!");
+
+    // ファイルサーバーの設定（www ディレクトリをルートとする）
+    let file_server = FileServer::new("www");
 
     // TUNデバイスの設定
     let tun = &Tun::builder()
@@ -49,14 +57,14 @@ async fn main() {
         };
         println!("reading {} bytes from tun: {:?}", buf.len(), buf);
 
-        if let Err(e) = handle_packet(buf, tun).await {
+        if let Err(e) = handle_packet(buf, tun, &file_server).await {
             eprintln!("Error handling packet: {}", e);
         }
     }
 }
 
 // パケット受信時、処理を行う
-async fn handle_packet(buf: &[u8], tun: &Tun) -> Result<(), Box<dyn std::error::Error>> {
+async fn handle_packet(buf: &[u8], tun: &Tun, file_server: &FileServer) -> Result<(), Box<dyn std::error::Error>> {
     // 前から読んでいくため、Streamに変換
     let mut stream = BitStream::new(buf.to_vec().to_bits());
     // 先頭4bitがプロコトルを表す
@@ -87,9 +95,14 @@ async fn handle_packet(buf: &[u8], tun: &Tun) -> Result<(), Box<dyn std::error::
                     } else if tcp_header.destination_port == 80
                         && (tcp_header.flags & TCP_ACK) != 0
                         && (tcp_header.flags & TCP_FIN) == 0
+                        && stream.remaining > 0
                     {
                         // HTTPリクエストを受信した場合、HTTPレスポンスを送信
                         println!("HTTP Packet Detected");
+                        
+                        // TCPペイロードからHTTPリクエストを抽出
+                        let http_payload = stream.read_remaining_bytes();
+                        
                         send_http_response(
                             ipv4_header.source_address,
                             ipv4_header.destination_address,
@@ -97,7 +110,9 @@ async fn handle_packet(buf: &[u8], tun: &Tun) -> Result<(), Box<dyn std::error::
                             tcp_header.destination_port,
                             tcp_header.sequence_number,
                             tcp_header.acknowledgment_number,
+                            &http_payload,
                             tun,
+                            file_server,
                         )
                         .await?;
                     }
@@ -134,11 +149,31 @@ async fn send_http_response(
     dest_port: u16,
     seq_num: u32,
     ack_num: u32,
+    http_payload: &[u8],
     tun: &Tun,
+    file_server: &FileServer,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    // 送信内容
-    // TODO: ファイルから読み込むなど、実際のHTTPレスポンスを生成する
-    let http_response = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: 53\r\nConnection: close\r\n\r\n<html><body><h1>Hello from Ferrix!</h1></body></html>";
+    // HTTPペイロードからHTTPリクエストを解析
+    let http_request_str = String::from_utf8_lossy(http_payload);
+    println!("Received HTTP request: {}", http_request_str);
+    
+    // HTTPリクエストを解析してレスポンスを生成
+    let http_response = match HttpRequest::parse(&http_request_str) {
+        Ok(request) => {
+            println!("Parsed HTTP request: method={}, path={}", request.method, request.path);
+            file_server.handle_request(&request)
+        }
+        Err(e) => {
+            println!("Failed to parse HTTP request: {}", e);
+            // パース失敗時はデフォルトレスポンスを送信
+            let mut response = HttpResponse::ok();
+            response.set_body_text("<html><body><h1>Hello from Ferrix!</h1></body></html>");
+            response.set_header("Content-Type", "text/html");
+            response
+        }
+    };
+
+    let response_bytes = http_response.to_bytes();
 
     let mut response = BitStream::new(Bits::new());
 
@@ -148,7 +183,7 @@ async fn send_http_response(
         5,
         0,
         0,
-        (20 + 20 + http_response.len() as u16) as u16, // IPv4ヘッダー(20 bytes) + TCPヘッダー(20 bytes) + HTTPデータ
+        (20 + 20 + response_bytes.len() as u16) as u16, // IPv4ヘッダー(20 bytes) + TCPヘッダー(20 bytes) + HTTPデータ
         (ack_num + 1) as u16,
         2, // Don't Fragment
         0,
@@ -167,16 +202,16 @@ async fn send_http_response(
         seq_num + 1,
         5, // 5 * 4 = 20 bytes
         0,
-        TCP_ACK | TCP_FIN,    // ACK + FINフラ
+        TCP_ACK | TCP_FIN,    // ACK + FINフラグ
         (seq_num + 1) as u16, // 最大ウィンドウサイズ
         0,
         &src_ip,
         &dest_ip,
-        http_response.as_bytes(),
+        &response_bytes,
     );
     response.append(tcp_header.to_bits());
 
-    response.append(http_response.as_bytes().to_bits());
+    response.append(response_bytes.to_bits());
 
     tun.send(&response.bits.to_u8s()).await?;
     println!("Sent HTTP response with FIN");

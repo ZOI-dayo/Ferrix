@@ -37,6 +37,19 @@ impl BitStream {
         self.remaining += data.size;
         self.bits.size - self.pos
     }
+
+    pub fn read_remaining_bytes(&self) -> Vec<u8> {
+        if self.remaining == 0 {
+            return Vec::new();
+        }
+        
+        let remaining_bits = Bits {
+            size: self.remaining,
+            data: self.bits.data[self.pos..self.pos + self.remaining].to_vec(),
+        };
+        
+        remaining_bits.to_u8s()
+    }
 }
 
 #[derive(Clone)]

@@ -1,0 +1,8 @@
+Hello from Ferrix!
+
+This is a plain text file served by the Ferrix file server.
+The server can handle various file types based on their extensions.
+
+Current time: File served successfully!
+Server: Ferrix HTTP File Server
+Technology: Rust + Custom TCP/IP Stack

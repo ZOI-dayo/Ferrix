@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>About Ferrix</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 40px;
+            background-color: #f0f8ff;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            background-color: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        h1 {
+            color: #2c5aa0;
+            border-bottom: 2px solid #2c5aa0;
+            padding-bottom: 10px;
+        }
+        .feature {
+            background-color: #f0f8ff;
+            padding: 15px;
+            margin: 15px 0;
+            border-radius: 5px;
+            border-left: 4px solid #2c5aa0;
+        }
+        code {
+            background-color: #f4f4f4;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-family: monospace;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>About Ferrix</h1>
+        <p>Ferrix is a custom network stack implementation written in Rust that demonstrates low-level networking concepts.</p>
+        
+        <div class="feature">
+            <h3>🌐 Network Stack</h3>
+            <p>Implements custom IPv4 and TCP packet processing using TUN devices for network interface simulation.</p>
+        </div>
+        
+        <div class="feature">
+            <h3>🔧 HTTP Server</h3>
+            <p>Built-in HTTP file server that can serve static files from the <code>www</code> directory with proper MIME type detection.</p>
+        </div>
+        
+        <div class="feature">
+            <h3>📁 File System</h3>
+            <p>Supports serving various file types including HTML, CSS, JavaScript, images, and text files.</p>
+        </div>
+        
+        <div class="feature">
+            <h3>🔒 Security</h3>
+            <p>Includes path traversal protection to prevent access to files outside the designated web directory.</p>
+        </div>
+        
+        <p><a href="/">&larr; Back to Home</a></p>
+    </div>
+</body>
+</html>
