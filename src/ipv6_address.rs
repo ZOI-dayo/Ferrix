@@ -4,7 +4,7 @@
 //! そのバイトストリームとの変換、表示機能を提供する。
 
 use std::fmt::{Display, Formatter};
-use crate::byte_stream::ByteStream;
+use crate::bit_stream::BitStream;
 use crate::byte_object::ByteObject;
 
 /// IPv6アドレスを表す構造体。
@@ -22,7 +22,7 @@ impl ByteObject for IPv6Address {
     ///
     /// # 戻り値
     /// 生成された `IPv6Address`。
-    fn from_bytes(stream: &mut ByteStream) -> Self {
+    fn from_bytes(stream: &mut BitStream) -> Self {
         IPv6Address {
             address: stream.pop(16).try_into().unwrap(),
         }
@@ -35,7 +35,7 @@ impl ByteObject for IPv6Address {
     ///
     /// # 戻り値
     /// 追加されたバイト数 (常に16)。
-    fn append_to(&self, dst: &mut ByteStream) -> usize {
+    fn append_to(&self, dst: &mut BitStream) -> usize {
         dst.append(&self.address);
         16
     }

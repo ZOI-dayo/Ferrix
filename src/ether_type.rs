@@ -4,7 +4,7 @@
 //! `EtherType` 列挙型と、そのバイトストリームとの変換、表示機能を提供する。
 
 use std::fmt::{Display, Formatter};
-use crate::byte_stream::ByteStream;
+use crate::bit_stream::BitStream;
 use crate::byte_object::ByteObject;
 
 /// イーサネットフレームのペイロードタイプを表す列挙型。
@@ -28,7 +28,7 @@ impl ByteObject for EtherType {
     ///
     /// # パニック
     /// 未知のイーサネットタイプが検出された場合、パニックします。
-    fn from_bytes(stream: &mut ByteStream) -> EtherType {
+    fn from_bytes(stream: &mut BitStream) -> EtherType {
         let raw = stream.pop(2);
         match raw {
             [0x08, 0x00] => EtherType::IPv4,
@@ -45,7 +45,7 @@ impl ByteObject for EtherType {
     ///
     /// # 戻り値
     /// 追加されたバイト数。
-    fn append_to(&self, dst: &mut ByteStream) -> usize {
+    fn append_to(&self, dst: &mut BitStream) -> usize {
         let content: &[u8] = match self {
             EtherType::IPv4 => &[0x08, 0x00],
             EtherType::ARP => &[0x08, 0x06],

@@ -1,17 +1,18 @@
 use std::{net::Ipv4Addr};
-use etherparse::{NetSlice, SlicedPacket, TransportSlice};
 use tokio_tun::Tun;
 
-mod arp_header;
+use crate::{bit_stream::{BitStream, BitUtils}, byte_object::ByteObject, ipv4_header::IPv4Header};
+
+// mod arp_header;
 mod byte_object;
-mod byte_stream;
-mod ether_type;
-mod ethernet_header;
+mod bit_stream;
+// mod ether_type;
+// mod ethernet_header;
 mod ipv4_address;
 mod ipv4_header;
-mod ipv6_address;
-mod ipv6_header;
-mod mac_address;
+// mod ipv6_address;
+// mod ipv6_header;
+// mod mac_address;
 
 #[tokio::main]
 async fn main() {
@@ -47,38 +48,56 @@ async fn main() {
         };
         println!("reading {} bytes from tun: {:?}", buf.len(), buf);
 
-        if let Err(e) = handle_packet(buf, &tun, id).await {
+        if let Err(e) = handle_packet(buf).await {
             eprintln!("Error handling packet: {}", e);
         }
     }
 }
 
-async fn handle_packet(buf: &[u8], tun: &Tun, id: usize) -> Result<(), Box<dyn std::error::Error>> {
-    let packet = match SlicedPacket::from_ip(buf) {
-        Ok(packet) => packet,
-        Err(e) => {
-            eprintln!("Failed to parse packet: {}", e);
+async fn handle_packet(buf: &[u8]) -> Result<(), Box<dyn std::error::Error>> {
+    println!("{:?}", buf.iter().map(|b| format!("{:02x}", b)).collect::<Vec<_>>());
+    let mut stream = BitStream::new(&BitUtils::u8s_to_bits(buf));
+    match BitUtils::bits_to_u8(stream.view(4))  {
+        4 => {
+            println!("IPv4 Packet Detected");
+            let header = IPv4Header::from_bytes(&mut stream);
+            println!("IPv4 Header: {}", header);
+        }
+        6 => {
+            println!("IPv6 Packet Detected");
+        }
+        _ => {
+            println!("Unknown Packet Type: {:?} {}", stream.view(4), BitUtils::bits_to_u8(stream.view(4)));
             return Ok(());
         }
-    };
-    if let (Some(net_header), Some(transport_header)) = (packet.net, packet.transport) {
-        if let (NetSlice::Ipv4(ipv4_header), TransportSlice::Tcp(tcp_header)) = (net_header, transport_header) {
-            if tcp_header.destination_port() == 80 {
-                let ipv4 = ipv4_header.header();
-                let src_ip = ipv4.source();
-                let dest_ip = ipv4.destination();
-                let src_port = tcp_header.source_port();
-                let dest_port = tcp_header.destination_port();
-
-                println!(
-                    "TCP Packet: {}:{} -> {}:{} (SYN: {}, ACK: {}, FIN: {})",
-                    format_ip(src_ip), src_port, format_ip(dest_ip), dest_port,
-                    tcp_header.syn(), tcp_header.ack(), tcp_header.fin()
-                );
-            }
-        }
     }
-    Ok(())
+    return Ok(());
+    // IPv6Header::from_bytes(&mut stream);
+    // let packet = match SlicedPacket::from_ip(buf) {
+    //     Ok(packet) => packet,
+    //     Err(e) => {
+    //         eprintln!("Failed to parse packet: {}", e);
+    //         return Ok(());
+    //     }
+    // };
+    // if let (Some(net_header), Some(transport_header)) = (packet.net, packet.transport) {
+    //     if let (NetSlice::Ipv4(ipv4_header), TransportSlice::Tcp(tcp_header)) = (net_header, transport_header) {
+    //         if tcp_header.destination_port() == 80 {
+    //             let ipv4 = ipv4_header.header();
+    //             let src_ip = ipv4.source();
+    //             let dest_ip = ipv4.destination();
+    //             let src_port = tcp_header.source_port();
+    //             let dest_port = tcp_header.destination_port();
+
+    //             println!(
+    //                 "TCP Packet: {}:{} -> {}:{} (SYN: {}, ACK: {}, FIN: {})",
+    //                 format_ip(src_ip), src_port, format_ip(dest_ip), dest_port,
+    //                 tcp_header.syn(), tcp_header.ack(), tcp_header.fin()
+    //             );
+    //         }
+    //     }
+    // }
+    // Ok(())
 }
 
 fn format_ip(ip: [u8; 4]) -> String {

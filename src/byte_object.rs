@@ -4,7 +4,7 @@
 //! バイトストリームから読み書きするための共通インターフェースを定義する
 //! `ByteObject` トレイトを提供する。
 
-use crate::byte_stream::ByteStream;
+use crate::bit_stream::BitStream;
 
 /// バイトストリームとの間でオブジェクトを変換するトレイト。
 ///
@@ -18,7 +18,7 @@ pub trait ByteObject {
     ///
     /// # 戻り値
     /// 生成されたオブジェクト。
-    fn from_bytes(src: &mut ByteStream) -> Self;
+    fn from_bytes(src: &mut BitStream) -> Self;
 
     /// オブジェクトをバイトストリームに追加する。
     ///
@@ -27,5 +27,5 @@ pub trait ByteObject {
     ///
     /// # 戻り値
     /// 追加されたバイト数。
-    fn append_to(&self, dst: &mut ByteStream) -> usize;
+    fn append_to(&self, dst: &mut BitStream) -> usize;
 }

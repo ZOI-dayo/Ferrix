@@ -4,7 +4,7 @@
 //! `EthernetHeader` 構造体と、そのバイトストリームとの変換、表示機能を提供する。
 
 use std::fmt::{Display, Formatter};
-use crate::byte_stream::ByteStream;
+use crate::bit_stream::BitStream;
 use crate::byte_object::ByteObject;
 use crate::mac_address::MacAddress;
 use crate::ether_type::EtherType;
@@ -26,7 +26,7 @@ impl ByteObject for EthernetHeader {
     ///
     /// # 戻り値
     /// 生成された `EthernetHeader`。
-    fn from_bytes(stream: &mut ByteStream) -> EthernetHeader {
+    fn from_bytes(stream: &mut BitStream) -> EthernetHeader {
         EthernetHeader {
             destination: MacAddress::from_bytes(stream),
             source: MacAddress::from_bytes(stream),
@@ -41,7 +41,7 @@ impl ByteObject for EthernetHeader {
     ///
     /// # 戻り値
     /// 追加されたバイト数。
-    fn append_to(&self, dst: &mut ByteStream) -> usize {
+    fn append_to(&self, dst: &mut BitStream) -> usize {
         self.destination.append_to(dst)
             + self.source.append_to(dst)
             + self.ether_type.append_to(dst)

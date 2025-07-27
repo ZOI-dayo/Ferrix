@@ -4,7 +4,7 @@
 //! バイトストリームとの変換、表示機能を提供する。
 
 use std::fmt::{Display, Formatter};
-use crate::byte_stream::ByteStream;
+use crate::bit_stream::BitStream;
 use crate::byte_object::ByteObject;
 use crate::ipv6_address::IPv6Address;
 
@@ -45,7 +45,7 @@ impl ByteObject for IPv6Header {
     ///
     /// # 戻り値
     /// 生成された `IPv6Header`。
-    fn from_bytes(stream: &mut ByteStream) -> Self {
+    fn from_bytes(stream: &mut BitStream) -> Self {
         let version_traffic_class_flow_label = u32::from_be_bytes(stream.pop(4).try_into().unwrap());
         let payload_length = u16::from_be_bytes(stream.pop(2).try_into().unwrap());
         let next_header = stream.pop(1)[0];
@@ -70,7 +70,7 @@ impl ByteObject for IPv6Header {
     ///
     /// # 戻り値
     /// 追加されたバイト数。
-    fn append_to(&self, dst: &mut ByteStream) -> usize {
+    fn append_to(&self, dst: &mut BitStream) -> usize {
         let mut total_len = 0;
         total_len += dst.append(&self.version_traffic_class_flow_label.to_be_bytes());
         total_len += dst.append(&self.payload_length.to_be_bytes());

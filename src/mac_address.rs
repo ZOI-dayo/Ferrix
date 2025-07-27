@@ -4,7 +4,7 @@
 //! そのバイトストリームとの変換、表示機能を提供する。
 
 use std::fmt::{Display, Formatter};
-use crate::byte_stream::ByteStream;
+use crate::bit_stream::BitStream;
 use crate::byte_object::ByteObject;
 
 /// MACアドレスを表す構造体。
@@ -23,7 +23,7 @@ impl ByteObject for MacAddress {
     ///
     /// # 戻り値
     /// 生成された `MacAddress`。
-    fn from_bytes(src: &mut ByteStream) -> Self {
+    fn from_bytes(src: &mut BitStream) -> Self {
         MacAddress {
             address: src.pop(6).try_into().unwrap(),
         }
@@ -36,7 +36,7 @@ impl ByteObject for MacAddress {
     ///
     /// # 戻り値
     /// 追加されたバイト数 (常に6)。
-    fn append_to(&self, dst: &mut ByteStream) -> usize {
+    fn append_to(&self, dst: &mut BitStream) -> usize {
         dst.append(&self.address);
         6
     }

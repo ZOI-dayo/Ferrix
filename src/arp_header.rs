@@ -5,7 +5,7 @@
 //! バイト配列を整数に変換するユーティリティ関数も含む。
 
 use std::fmt::{Display, Formatter};
-use crate::byte_stream::ByteStream;
+use crate::bit_stream::BitStream;
 use crate::byte_object::ByteObject;
 use crate::ether_type::EtherType;
 use crate::mac_address::MacAddress;
@@ -51,7 +51,7 @@ impl ByteObject for ArpHeader {
     ///
     /// # 戻り値
     /// 生成された `ArpHeader`。
-    fn from_bytes(stream: &mut ByteStream) -> Self {
+    fn from_bytes(stream: &mut BitStream) -> Self {
         ArpHeader {
             htype: bytes_to_int(stream.pop(2)),
             ptype: EtherType::from_bytes(stream),
@@ -72,7 +72,7 @@ impl ByteObject for ArpHeader {
     ///
     /// # 戻り値
     /// 追加されたバイト数。
-    fn append_to(&self, dst: &mut ByteStream) -> usize {
+    fn append_to(&self, dst: &mut BitStream) -> usize {
         let mut total_len = 0;
         total_len += dst.append(&self.htype.to_be_bytes()[6..]); // 2バイト
         total_len += self.ptype.append_to(dst);
