@@ -1,4 +1,4 @@
-use crate::bit_stream::{BitStream, BitUtils};
+use crate::bit_stream::{BitStream, Bits, BitsCompatible};
 use crate::byte_object::ByteObject;
 use crate::ipv4_address::IPv4Address;
 use std::fmt::{Display, Formatter};
@@ -16,19 +16,18 @@ pub struct TcpHeader {
     pub urgent_pointer: u16,
 }
 
-
 impl ByteObject for TcpHeader {
-    fn from_bytes(stream: &mut BitStream) -> Self {
-        let source_port = BitUtils::bits_to_u16(stream.pop(16));
-        let destination_port = BitUtils::bits_to_u16(stream.pop(16));
-        let sequence_number = BitUtils::bits_to_u32(stream.pop(32));
-        let acknowledgment_number = BitUtils::bits_to_u32(stream.pop(32));
-        let data_offset = BitUtils::bits_to_u8(stream.pop(4));
-        let reserved = BitUtils::bits_to_u8(stream.pop(4));
-        let flags = BitUtils::bits_to_u8(stream.pop(8));
-        let window_size = BitUtils::bits_to_u16(stream.pop(16));
-        let checksum = BitUtils::bits_to_u16(stream.pop(16));
-        let urgent_pointer = BitUtils::bits_to_u16(stream.pop(16));
+    fn from_stream(src: &mut BitStream) -> Self {
+        let source_port = src.pop(16).to_u16();
+        let destination_port = src.pop(16).to_u16();
+        let sequence_number = src.pop(32).to_u32();
+        let acknowledgment_number = src.pop(32).to_u32();
+        let data_offset = src.pop(4).to_u8();
+        let reserved = src.pop(4).to_u8();
+        let flags = src.pop(8).to_u8();
+        let window_size = src.pop(16).to_u16();
+        let checksum = src.pop(16).to_u16();
+        let urgent_pointer = src.pop(16).to_u16();
 
         TcpHeader {
             source_port,
@@ -43,22 +42,21 @@ impl ByteObject for TcpHeader {
             urgent_pointer,
         }
     }
-    fn append_to(&self, dst: &mut BitStream) -> usize {
-        let mut total_len = 0;
-        total_len += dst.append(&BitUtils::u16_to_bits(self.source_port)[..]);
-        total_len += dst.append(&BitUtils::u16_to_bits(self.destination_port)[..]);
-        total_len += dst.append(&BitUtils::u32_to_bits(self.sequence_number)[..]);
-        total_len += dst.append(&BitUtils::u32_to_bits(self.acknowledgment_number)[..]);
-        total_len += dst.append(&BitUtils::u8_to_bits(self.data_offset)[4..]);
-        total_len += dst.append(&BitUtils::u8_to_bits(self.reserved)[4..]);
-        total_len += dst.append(&BitUtils::u8_to_bits(self.flags)[..]);
-        total_len += dst.append(&BitUtils::u16_to_bits(self.window_size)[..]);
-        total_len += dst.append(&BitUtils::u16_to_bits(self.checksum)[..]);
-        total_len += dst.append(&BitUtils::u16_to_bits(self.urgent_pointer)[..]);
-        total_len
+    fn to_bits(&self) -> Bits {
+        let mut bits = Bits::new();
+        bits.append(&self.source_port.to_bits());
+        bits.append(&self.destination_port.to_bits());
+        bits.append(&self.sequence_number.to_bits());
+        bits.append(&self.acknowledgment_number.to_bits());
+        bits.append(&self.data_offset.to_bits()[4..].to_bits());
+        bits.append(&self.reserved.to_bits()[4..].to_bits());
+        bits.append(&self.flags.to_bits());
+        bits.append(&self.window_size.to_bits());
+        bits.append(&self.checksum.to_bits());
+        bits.append(&self.urgent_pointer.to_bits());
+        bits
     }
 }
-
 
 impl TcpHeader {
     /// TCPセグメントのチェックサムを計算する
@@ -74,17 +72,13 @@ impl TcpHeader {
         // IPv4疑似ヘッダーの計算
         // Source IP Address (32 bits = 2 x 16 bits)
         let src_bytes = &src_ip.address;
-        let src_word1 = ((src_bytes[0] as u16) << 8) | (src_bytes[1] as u16);
-        let src_word2 = ((src_bytes[2] as u16) << 8) | (src_bytes[3] as u16);
-        sum += src_word1 as u32;
-        sum += src_word2 as u32;
+        sum += src_bytes.to_u16s()[0] as u32;
+        sum += src_bytes.to_u16s()[1] as u32;
 
         // Destination IP Address (32 bits = 2 x 16 bits)
         let dst_bytes = &dst_ip.address;
-        let dst_word1 = ((dst_bytes[0] as u16) << 8) | (dst_bytes[1] as u16);
-        let dst_word2 = ((dst_bytes[2] as u16) << 8) | (dst_bytes[3] as u16);
-        sum += dst_word1 as u32;
-        sum += dst_word2 as u32;
+        sum += dst_bytes.to_u16s()[0] as u32;
+        sum += dst_bytes.to_u16s()[1] as u32;
 
         // Protocol (TCP = 6)
         sum += 6u16 as u32;
@@ -102,9 +96,8 @@ impl TcpHeader {
         sum += (self.acknowledgment_number & 0xFFFF) as u32;
 
         // Data Offset (4 bits) + Reserved (4 bits) + Flags (8 bits)
-        let offset_reserved_flags = ((self.data_offset as u16) << 12)
-            | ((self.reserved as u16) << 8)
-            | (self.flags as u16);
+        let offset_reserved_flags =
+            ((self.data_offset as u16) << 12) | ((self.reserved as u16) << 8) | (self.flags as u16);
         sum += offset_reserved_flags as u32;
 
         sum += self.window_size as u32;
@@ -144,12 +137,7 @@ impl TcpHeader {
     }
 
     /// チェックサムを再計算して更新する
-    pub fn update_checksum(
-        &mut self,
-        src_ip: &IPv4Address,
-        dst_ip: &IPv4Address,
-        tcp_data: &[u8],
-    ) {
+    pub fn update_checksum(&mut self, src_ip: &IPv4Address, dst_ip: &IPv4Address, tcp_data: &[u8]) {
         self.checksum = self.calculate_checksum(src_ip, dst_ip, tcp_data);
     }
 

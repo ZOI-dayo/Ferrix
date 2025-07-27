@@ -1,13 +1,13 @@
-//*
-use etherparse::{PacketBuilder, err::ip};
-use std::{net::Ipv4Addr, process::exit};
+use std::net::Ipv4Addr;
+use etherparse::PacketBuilder;
 use tokio_tun::Tun;
 
 use crate::{
-    bit_stream::{BitStream, BitUtils},
+    bit_stream::{BitStream, Bits, BitsCompatible},
     byte_object::ByteObject,
     ipv4_address::IPv4Address,
     ipv4_header::IPv4Header,
+    tcp_flags::{TCP_ACK, TCP_FIN, TCP_SYN},
     tcp_header::TcpHeader,
 };
 
@@ -21,13 +21,17 @@ mod ipv4_header;
 // mod ipv6_address;
 // mod ipv6_header;
 // mod mac_address;
+mod tcp_flags;
 mod tcp_header;
 
 #[tokio::main]
 async fn main() {
+    // --- サーバーの起動 ---
     println!("Hello, world!");
+
+    // TUNデバイスの設定
     let tun = &Tun::builder()
-        .name("")
+        .name("") // 名称はOSに委ねる
         .mtu(1350)
         .up()
         .address(Ipv4Addr::new(10, 0, 0, 1))
@@ -47,13 +51,14 @@ async fn main() {
     println!("  Broadcast: {}", tun.broadcast().unwrap());
     println!("  Netmask: {}", tun.netmask().unwrap());
 
-    println!("Please execute `ping 10.1.0.2` from another terminal to test.");
+    println!("Please execute `curl 10.1.0.2` from another terminal to test.");
 
     let mut buf = vec![0; 1504];
 
+    // メインループ
     loop {
-        let (buf, id) = tokio::select! {
-            Ok(n) = tun.recv(&mut buf) => (&buf[..n], 0),
+        let buf = tokio::select! {
+            Ok(n) = tun.recv(&mut buf) => &buf[..n],
         };
         println!("reading {} bytes from tun: {:?}", buf.len(), buf);
 
@@ -63,36 +68,27 @@ async fn main() {
     }
 }
 
+// パケット受信時、処理を行う
 async fn handle_packet(buf: &[u8], tun: &Tun) -> Result<(), Box<dyn std::error::Error>> {
-    println!(
-        "{:?}",
-        buf.iter().map(|b| format!("{:02x}", b)).collect::<Vec<_>>()
-    );
-    let mut stream = BitStream::new(&BitUtils::u8s_to_bits(buf));
-    match BitUtils::bits_to_u8(stream.view(4)) {
+    // 前から読んでいくため、Streamに変換
+    let mut stream = BitStream::new(buf.to_vec().to_bits());
+    // 先頭4bitがプロコトルを表す
+    match stream.view(4).to_u8() {
         4 => {
+            // IPv4パケットの処理
             println!("IPv4 Packet Detected");
-            let ipv4_header = IPv4Header::from_bytes(&mut stream);
+            let ipv4_header = IPv4Header::from_stream(&mut stream);
             println!("IPv4 Header: {}", ipv4_header);
             match ipv4_header.protocol {
                 6 => {
+                    // TCPパケットの処理
                     println!("TCP Packet Detected");
-                    let tcp_header = TcpHeader::from_bytes(&mut stream);
+                    let tcp_header = TcpHeader::from_stream(&mut stream);
                     println!("TCP Header: {}", tcp_header);
-                    let payload_bytes = BitUtils::bits_to_u8s(&stream.bits);
-                    println!("{:?}, {:?}, {:?}", BitUtils::bits_to_u8s(&stream.bits), payload_bytes, String::from_utf8_lossy(&payload_bytes[..]));
-                    if (tcp_header.flags & 0b00000010 != 0) {
+                    if (tcp_header.flags & TCP_SYN) != 0 {
+                        // SYNフラグが立っている場合、SYN-ACKを送信
                         println!("TCP SYN Packet Detected");
                         send_syn_ack(
-                            ipv4_header.source_address.address,
-                            ipv4_header.destination_address.address,
-                            tcp_header.source_port,
-                            tcp_header.destination_port,
-                            tcp_header.sequence_number,
-                            tun,
-                        )
-                        .await?;
-                        send_syn_ack2(
                             ipv4_header.source_address,
                             ipv4_header.destination_address,
                             tcp_header.source_port,
@@ -102,219 +98,102 @@ async fn handle_packet(buf: &[u8], tun: &Tun) -> Result<(), Box<dyn std::error::
                         )
                         .await?;
                     } else if tcp_header.destination_port == 80 {
+                        // HTTPリクエストを受信した場合、HTTPレスポンスを送信
                         println!("HTTP Packet Detected");
-                        // send_http_response(
-                        //     ipv4_header.source_address,
-                        //     ipv4_header.destination_address,
-                        //     tcp_header.source_port,
-                        //     tcp_header.destination_port,
-                        //     tcp_header.acknowledgment_number,
-                        //     tcp_header.sequence_number,
-                        //     tun,
-                        // )
-                        // .await?;
                         send_http_response(
-                            ipv4_header.source_address.address,
-                            ipv4_header.destination_address.address,
+                            ipv4_header.source_address,
+                            ipv4_header.destination_address,
                             tcp_header.source_port,
                             tcp_header.destination_port,
                             tcp_header.sequence_number,
                             tcp_header.acknowledgment_number,
                             tun,
-                        ).await?;
+                        )
+                        .await?;
                     }
                 }
                 17 => {
+                    // UDPパケットの処理
                     println!("UDP Packet Detected");
                     todo!("Handle UDP packet");
                 }
                 _ => {
+                    // その他のプロトコルは無視
                     println!("Unknown Protocol: {}", ipv4_header.protocol);
                     return Ok(());
                 }
             }
         }
         6 => {
+            // IPv6パケットの処理
             println!("IPv6 Packet Detected");
             // todo!("Handle IPv6 packet");
         }
         _ => {
-            println!(
-                "Unknown Packet Type: {}",
-                BitUtils::bits_to_u8(stream.view(4))
-            );
+            println!("Unknown Packet Type: {}", stream.view(4).to_u8());
             return Ok(());
         }
     }
     return Ok(());
-    // IPv6Header::from_bytes(&mut stream);
-    // let packet = match SlicedPacket::from_ip(buf) {
-    //     Ok(packet) => packet,
-    //     Err(e) => {
-    //         eprintln!("Failed to parse packet: {}", e);
-    //         return Ok(());
-    //     }
-    // };
-    // if let (Some(net_header), Some(transport_header)) = (packet.net, packet.transport) {
-    //     if let (NetSlice::Ipv4(ipv4_header), TransportSlice::Tcp(tcp_header)) = (net_header, transport_header) {
-    //         if tcp_header.destination_port() == 80 {
-    //             let ipv4 = ipv4_header.header();
-    //             let src_ip = ipv4.source();
-    //             let dest_ip = ipv4.destination();
-    //             let src_port = tcp_header.source_port();
-    //             let dest_port = tcp_header.destination_port();
-
-    //             println!(
-    //                 "TCP Packet: {}:{} -> {}:{} (SYN: {}, ACK: {}, FIN: {})",
-    //                 format_ip(src_ip), src_port, format_ip(dest_ip), dest_port,
-    //                 tcp_header.syn(), tcp_header.ack(), tcp_header.fin()
-    //             );
-    //         }
-    //     }
-    // }
-    // Ok(())
 }
 
 async fn send_http_response(
-    src_ip: [u8; 4],
-    dest_ip: [u8; 4],
-    src_port: u16, 
+    src_ip: IPv4Address,
+    dest_ip: IPv4Address,
+    src_port: u16,
     dest_port: u16,
     seq_num: u32,
     ack_num: u32,
-    tun: &Tun
+    tun: &Tun,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    // 送信内容
+    // TODO: ファイルから読み込むなど、実際のHTTPレスポンスを生成する
     let http_response = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: 53\r\nConnection: close\r\n\r\n<html><body><h1>Hello from Ferrix!</h1></body></html>";
 
-    let builder = PacketBuilder::ipv4(dest_ip, src_ip, 64)
-        .tcp(dest_port, src_port, ack_num, (seq_num + 1) as u16)
-        .ack(seq_num + 1)
-        .fin(); // FINフラグを追加して接続を終了
+    let mut response = BitStream::new(Bits::new());
 
-    let mut response = Vec::new();
-    builder.write(&mut response, http_response.as_bytes())?;
+    // IPv4ヘッダーの作成
+    let ipv4_header = IPv4Header::new_with_checksum(
+        4,
+        5,
+        0,
+        0,
+        (20 + 20 + http_response.len() as u16) as u16, // IPv4ヘッダー(20 bytes) + TCPヘッダー(20 bytes) + HTTPデータ
+        (ack_num + 1) as u16,
+        2, // Don't Fragment
+        0,
+        64,
+        6, // TCP
+        dest_ip.clone(),
+        src_ip.clone(),
+    );
+    response.append(ipv4_header.to_bits());
 
-    tun.send(&response).await?;
+    // TCPヘッダーの作成
+    let tcp_header = TcpHeader::new_with_checksum(
+        dest_port,
+        src_port,
+        ack_num,
+        seq_num + 1,
+        5, // 5 * 4 = 20 bytes
+        0,
+        TCP_ACK | TCP_FIN,    // ACK + FINフラ
+        (seq_num + 1) as u16, // 最大ウィンドウサイズ
+        0,
+        &src_ip,
+        &dest_ip,
+        http_response.as_bytes(),
+    );
+    response.append(tcp_header.to_bits());
+
+    response.append(http_response.as_bytes().to_bits());
+
+    tun.send(&response.bits.to_u8s()).await?;
     println!("Sent HTTP response with FIN");
     Ok(())
 }
-
-/*
-async fn send_http_response(
-    dest_ip: IPv4Address,
-    src_ip: IPv4Address,
-    dest_port: u16,
-    src_port: u16,
-    ack_num: u32,
-    seq_num: u32,
-    tun: &Tun,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let mut response = BitStream::new(&mut Vec::new());
-
-    let http_response = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: 52\r\nConnection: close\r\n\r\n<html><body><h1>Hello from Ferrix!</h1></body></html>";
-
-    let mut tcp_header = TcpHeader {
-        source_port: src_port,
-        destination_port: dest_port,
-        sequence_number: ack_num,
-        acknowledgment_number: seq_num + 1,
-        data_offset: 5, // 5 * 4 = 20 bytes
-        reserved: 0,
-        flags: 0b00010001,  // ACK + FIN flag
-        window_size: 65535, // Maximum window size
-        checksum: 0,        // Placeholder for checksum
-        urgent_pointer: 0,
-    };
-    tcp_header.update_checksum(&src_ip, &dest_ip, http_response.as_bytes());
-
-    // Calculate total length: IPv4 header (20 bytes) + TCP header (20 bytes) + HTTP data
-    let ipv4_header_size = 20u16; // IHL = 5, so 5 * 4 = 20 bytes
-    let tcp_header_size = 20u16; // Data offset = 5, so 5 * 4 = 20 bytes
-    let http_data_size = http_response.len() as u16;
-    let total_length = ipv4_header_size + tcp_header_size + http_data_size;
-
-    let mut ipv4_header = IPv4Header {
-        version: 4,
-        ihl: 5,
-        dscp: 0,
-        ecn: 0,
-        total_length,
-        identification: 0,
-        flags: 2,
-        fragment_offset: 0,
-        ttl: 64,
-        protocol: 6,
-        header_checksum: 0,
-        source_address: src_ip.clone(),
-        destination_address: dest_ip.clone(),
-    };
-    ipv4_header.update_checksum();
-
-    ipv4_header.append_to(&mut response);
-    tcp_header.append_to(&mut response);
-    response.append(&BitUtils::u8s_to_bits(http_response.as_bytes()));
-
-    // tun.send(&BitUtils::bits_to_u8s(&response.bits)).await?;
-    println!(
-        "{:?}",
-        &BitUtils::bits_to_u8s(&response.bits)
-            .iter()
-            .map(|b| format!("{:02x}", b))
-            .collect::<Vec<_>>()
-    );
-    println!("Sent HTTP response with FIN");
-
-    //
-
-    let builder = PacketBuilder::ipv4(src_ip.address, dest_ip.address, 64)
-        .tcp(src_port, dest_port, ack_num, (seq_num + 1) as u16)
-        .ack(seq_num + 1)
-        .fin(); // FINフラグを追加して接続を終了
-
-    let mut response = Vec::new();
-    builder.write(&mut response, http_response.as_bytes())?;
-    println!(
-        "{:?}",
-        &response
-            .iter()
-            .map(|b| format!("{:02x}", b))
-            .collect::<Vec<_>>()
-    );
-    tun.send(&response).await?;
-
-    Ok(())
-}
-    */
 
 async fn send_syn_ack(
-    src_ip: [u8; 4],
-    dest_ip: [u8; 4],
-    src_port: u16,
-    dest_port: u16,
-    seq_num: u32,
-    tun: &Tun,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let builder = PacketBuilder::ipv4(dest_ip, src_ip, 64)
-        .tcp(dest_port, src_port, 12345, (seq_num + 1) as u16)
-        .syn()
-        .ack(seq_num + 1);
-
-    let mut response = Vec::new();
-    builder.write(&mut response, &[])?;
-
-    // tun.send(&response).await?;
-    println!(
-        "{:?}",
-        &response
-            .iter()
-            .map(|b| format!("{:02x}", b))
-            .collect::<Vec<_>>()
-    );
-    println!("Sent SYN-ACK response");
-    Ok(())
-}
-
-async fn send_syn_ack2(
     src_ip: IPv4Address,
     dest_ip: IPv4Address,
     src_port: u16,
@@ -322,7 +201,7 @@ async fn send_syn_ack2(
     seq_num: u32,
     tun: &Tun,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let mut response = BitStream::new(&mut Vec::new());
+    let mut response = BitStream::new(Bits::new());
 
     let mut tcp_header = TcpHeader {
         source_port: dest_port,
@@ -331,9 +210,9 @@ async fn send_syn_ack2(
         acknowledgment_number: seq_num + 1,
         data_offset: 5, // 5 * 4 = 20 bytes
         reserved: 0,
-        flags: 0b00010010, // SYN flag
+        flags: 0b00010010,                 // SYN flag
         window_size: (seq_num + 1) as u16, // Maximum window size
-        checksum: 0,        // Placeholder for checksum
+        checksum: 0,                       // Placeholder for checksum
         urgent_pointer: 0,
     };
     tcp_header.update_checksum(&src_ip, &dest_ip, &[]);
@@ -360,185 +239,21 @@ async fn send_syn_ack2(
     };
     ipv4_header.update_checksum();
 
-    ipv4_header.append_to(&mut response);
-    tcp_header.append_to(&mut response);
+    response.append(ipv4_header.to_bits());
+    response.append(tcp_header.to_bits());
 
     println!(
         "{:?}",
-        &BitUtils::bits_to_u8s(&response.bits)
+        &response
+            .bits
+            .to_u8s()
             .iter()
             .map(|b| format!("{:02x}", b))
             .collect::<Vec<_>>()
     );
     // exit(0);
-    tun.send(&BitUtils::bits_to_u8s(&response.bits)).await?;
+    tun.send(&response.bits.to_u8s()).await?;
     println!("Sent SYN-ACK response");
 
     Ok(())
 }
-
-
-//     */
-/*
-use std::net::Ipv4Addr;
-use std::os::unix::io::AsRawFd;
-use std::sync::Arc;
-use tokio_tun::Tun;
-use etherparse::{PacketBuilder, TransportSlice, NetSlice};
-
-#[tokio::main]
-async fn main() {
-    let queues = 1;
-
-    let tuns = Tun::builder()
-        .name("")
-        .mtu(1350)
-        .up()
-        .address(Ipv4Addr::new(10, 0, 0, 1))
-        .destination(Ipv4Addr::new(10, 1, 0, 1))
-        .broadcast(Ipv4Addr::BROADCAST)
-        .netmask(Ipv4Addr::new(255, 255, 255, 0))
-        .queues(queues)
-        .build()
-        .unwrap();
-
-    println!("--------------");
-    println!("{} tuns created", queues);
-    println!("--------------");
-
-    println!(
-        "┌ name: {}\n├ fd: {}\n├ mtu: {}\n├ flags: {}\n├ address: {}\n├ destination: {}\n├ broadcast: {}\n└ netmask: {}",
-        tuns[0].name(),
-        tuns[0].as_raw_fd(),
-        tuns[0].mtu().unwrap(),
-        tuns[0].flags().unwrap(),
-        tuns[0].address().unwrap(),
-        tuns[0].destination().unwrap(),
-        tuns[0].broadcast().unwrap(),
-        tuns[0].netmask().unwrap(),
-    );
-
-    println!("---------------------");
-    println!("ping 10.1.0.2 to test");
-    println!("---------------------");
-
-    let mut tuns = tuns.into_iter();
-    let tun0 = Arc::new(tuns.next().unwrap());
-
-    let mut buf0 = [0u8; 1024];
-
-    loop {
-        let (buf, id) = tokio::select! {
-            Ok(n) = tun0.recv(&mut buf0) => (&buf0[..n], 0),
-        };
-        println!("reading {} bytes from tuns[{}]: {:?}", buf.len(), id, buf);
-        
-        // パケットを解析してHTTP応答を送信
-        if let Err(e) = handle_packet(buf, &tun0).await {
-            eprintln!("Error handling packet: {}", e);
-        }
-    }
-}
-
-async fn handle_packet(
-    data: &[u8], 
-    tun0: &Arc<Tun>
-) -> Result<(), Box<dyn std::error::Error>> {
-    // パケットを解析
-    let packet = match etherparse::SlicedPacket::from_ip(data) {
-        Ok(packet) => packet,
-        Err(_) => return Ok(()), // 解析失敗は無視
-    };
-
-    // TCP HTTPリクエストの場合のみ処理
-    if let (Some(net_header), Some(transport_header)) = (packet.net, packet.transport) {
-        if let (NetSlice::Ipv4(ipv4_header), TransportSlice::Tcp(tcp_header)) = (net_header, transport_header) {
-            // HTTPポート(80)への接続をチェック
-            if tcp_header.destination_port() == 80 {
-                let ipv4 = ipv4_header.header();
-                let src_ip = ipv4.source();
-                let dest_ip = ipv4.destination();
-                let src_port = tcp_header.source_port();
-                let dest_port = tcp_header.destination_port();
-
-                println!("HTTP packet detected: {}:{} -> {}:{}, SYN: {}, ACK: {}, FIN: {}", 
-                    format_ip(src_ip), src_port, format_ip(dest_ip), dest_port,
-                    tcp_header.syn(), tcp_header.ack(), tcp_header.fin());
-
-                // SYNパケットの場合、SYN-ACKで応答
-                if tcp_header.syn() && !tcp_header.ack() {
-                    send_syn_ack(src_ip, dest_ip, src_port, dest_port, 
-                                tcp_header.sequence_number(), tun0).await?;
-                }
-                // HTTPリクエストデータが含まれている場合のみHTTPレスポンスを送信
-                else if tcp_header.ack() && !tcp_header.syn() && !tcp_header.fin() {
-                    // 簡単なペイロード検出: 一定サイズ以上でHTTPメソッドを含む場合
-                    if data.len() > 60 { // IP(20) + TCP(20) + HTTPヘッダ最小値
-                        let payload_str = String::from_utf8_lossy(data);
-                        if payload_str.contains("GET ") || payload_str.contains("POST ") {
-                            println!("HTTP request detected in packet");
-                            send_http_response(src_ip, dest_ip, src_port, dest_port, 
-                                              tcp_header.sequence_number(), tcp_header.acknowledgment_number(),
-                                              tun0).await?;
-                        }
-                    }
-                }
-            }
-        }
-    }
-    Ok(())
-}
-
-async fn send_syn_ack(
-    src_ip: [u8; 4],
-    dest_ip: [u8; 4], 
-    src_port: u16,
-    dest_port: u16,
-    seq_num: u32,
-    tun0: &Arc<Tun>
-) -> Result<(), Box<dyn std::error::Error>> {
-    let builder = PacketBuilder::ipv4(dest_ip, src_ip, 64)
-        .tcp(dest_port, src_port, 12345, (seq_num + 1) as u16)
-        .syn()
-        .ack(seq_num + 1);
-
-    let mut response = Vec::new();
-    builder.write(&mut response, &[])?;
-
-    let tun = tun0;
-
-    tun.send(&response).await?;
-    println!("Sent SYN-ACK response");
-    Ok(())
-}
-
-async fn send_http_response(
-    src_ip: [u8; 4],
-    dest_ip: [u8; 4],
-    src_port: u16, 
-    dest_port: u16,
-    seq_num: u32,
-    ack_num: u32,
-    tun0: &Arc<Tun>
-) -> Result<(), Box<dyn std::error::Error>> {
-    let http_response = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: 52\r\nConnection: close\r\n\r\n<html><body><h1>Hello from Ferrix!</h1></body></html>";
-
-    let builder = PacketBuilder::ipv4(dest_ip, src_ip, 64)
-        .tcp(dest_port, src_port, ack_num, (seq_num + 1) as u16)
-        .ack(seq_num + 1)
-        .fin(); // FINフラグを追加して接続を終了
-
-    let mut response = Vec::new();
-    builder.write(&mut response, http_response.as_bytes())?;
-
-    let tun = tun0;
-
-    tun.send(&response).await?;
-    println!("Sent HTTP response with FIN");
-    Ok(())
-}
-
-fn format_ip(ip: [u8; 4]) -> String {
-    format!("{}.{}.{}.{}", ip[0], ip[1], ip[2], ip[3])
-}
-    */

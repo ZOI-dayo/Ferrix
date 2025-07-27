@@ -1,24 +1,23 @@
 use std::fmt::{Display, Formatter};
-use crate::bit_stream::{BitStream, BitUtils};
+use crate::bit_stream::{BitStream, Bits};
 use crate::byte_object::ByteObject;
 
 #[derive(Clone)]
 pub struct IPv4Address {
-    pub address: [u8; 4],
+    pub address: Bits,
 }
 
 impl ByteObject for IPv4Address {
-    fn from_bytes(stream: &mut BitStream) -> Self {
-        IPv4Address {
-            address: BitUtils::bits_to_u8s(stream.pop(32))
-                .try_into()
-                .expect("Invalid IPv4 address length"),
-        }
+    fn from_stream(src: &mut BitStream) -> Self {
+        let bits = src.pop(32);
+        let address = bits
+            .try_into()
+            .expect("Invalid IPv4 address length");
+        IPv4Address { address }
     }
 
-    fn append_to(&self, dst: &mut BitStream) -> usize {
-        dst.append(&BitUtils::u8s_to_bits(&self.address));
-        32
+    fn to_bits(&self) -> Bits {
+        self.address.clone()
     }
 }
 
@@ -27,7 +26,7 @@ impl Display for IPv4Address {
         write!(
             f,
             "ipv4({}.{}.{}.{})",
-            self.address[0], self.address[1], self.address[2], self.address[3]
+            self.address.to_u8s()[0], self.address.to_u8s()[1], self.address.to_u8s()[2], self.address.to_u8s()[3]
         )
     }
 }
