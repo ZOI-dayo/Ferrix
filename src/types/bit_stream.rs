@@ -85,7 +85,7 @@ impl Bits {
             let mut byte = 0u8;
             for (i, &bit) in chunk.iter().enumerate() {
                 if bit {
-                    byte |= 1 << (7- i);
+                    byte |= 1 << (7 - i);
                 }
             }
             result.push(byte);
@@ -144,28 +144,40 @@ pub trait BitsCompatible {
 impl BitsCompatible for u8 {
     fn to_bits(&self) -> Bits {
         let bits = (0..8).map(|i| (self & (1 << (7 - i))) != 0).collect();
-        Bits { size: 8, data: bits }
+        Bits {
+            size: 8,
+            data: bits,
+        }
     }
 }
 
 impl BitsCompatible for u16 {
     fn to_bits(&self) -> Bits {
         let bits = (0..16).map(|i| (self & (1 << (15 - i))) != 0).collect();
-        Bits { size: 16, data: bits }
+        Bits {
+            size: 16,
+            data: bits,
+        }
     }
 }
 
 impl BitsCompatible for u32 {
     fn to_bits(&self) -> Bits {
         let bits = (0..32).map(|i| (self & (1 << (31 - i))) != 0).collect();
-        Bits { size: 32, data: bits }
+        Bits {
+            size: 32,
+            data: bits,
+        }
     }
 }
 
 impl BitsCompatible for u64 {
     fn to_bits(&self) -> Bits {
         let bits = (0..64).map(|i| (self & (1 << (63 - i))) != 0).collect();
-        Bits { size: 64, data: bits }
+        Bits {
+            size: 64,
+            data: bits,
+        }
     }
 }
 
@@ -174,32 +186,47 @@ impl BitsCompatible for usize {
         let bits = (0..std::mem::size_of::<usize>() * 8)
             .map(|i| (self & (1 << (std::mem::size_of::<usize>() * 8 - 1 - i))) != 0)
             .collect();
-        Bits { size: std::mem::size_of::<usize>() * 8, data: bits }
+        Bits {
+            size: std::mem::size_of::<usize>() * 8,
+            data: bits,
+        }
     }
 }
 
 impl BitsCompatible for Vec<u8> {
     fn to_bits(&self) -> Bits {
         let bits: Vec<bool> = self.iter().flat_map(|&v| v.to_bits().data).collect();
-        Bits { size: bits.len(), data: bits }
+        Bits {
+            size: bits.len(),
+            data: bits,
+        }
     }
 }
 
 impl BitsCompatible for Vec<bool> {
     fn to_bits(&self) -> Bits {
-        Bits { size: self.len(), data: self.clone() }
+        Bits {
+            size: self.len(),
+            data: self.clone(),
+        }
     }
 }
 
 impl BitsCompatible for [u8] {
     fn to_bits(&self) -> Bits {
         let bits: Vec<bool> = self.iter().flat_map(|&v| v.to_bits().data).collect();
-        Bits { size: bits.len(), data: bits }
+        Bits {
+            size: bits.len(),
+            data: bits,
+        }
     }
 }
 
 impl BitsCompatible for [bool] {
     fn to_bits(&self) -> Bits {
-        Bits { size: self.len(), data: self.to_vec() }
+        Bits {
+            size: self.len(),
+            data: self.to_vec(),
+        }
     }
 }

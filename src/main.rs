@@ -4,11 +4,11 @@ use tokio_tun::Tun;
 mod protocols;
 mod types;
 
-use crate::protocols::ip::ipv4_header::{IPv4Header};
+use crate::protocols::ip::ipv4_address::IPv4Address;
+use crate::protocols::ip::ipv4_header::IPv4Header;
 use crate::protocols::tcp::tcp_flags::{TCP_ACK, TCP_FIN, TCP_SYN};
 use crate::protocols::tcp::tcp_header::TcpHeader;
 use crate::types::bit_stream::{BitStream, Bits, BitsCompatible};
-use crate::protocols::ip::ipv4_address::IPv4Address;
 use crate::types::byte_object::ByteObject;
 
 #[tokio::main]
@@ -84,7 +84,10 @@ async fn handle_packet(buf: &[u8], tun: &Tun) -> Result<(), Box<dyn std::error::
                             tun,
                         )
                         .await?;
-                    } else if tcp_header.destination_port == 80 {
+                    } else if tcp_header.destination_port == 80
+                        && (tcp_header.flags & TCP_ACK) != 0
+                        && (tcp_header.flags & TCP_FIN) == 0
+                    {
                         // HTTPリクエストを受信した場合、HTTPレスポンスを送信
                         println!("HTTP Packet Detected");
                         send_http_response(
