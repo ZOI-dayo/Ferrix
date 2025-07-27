@@ -1,28 +1,15 @@
 use std::net::Ipv4Addr;
-use etherparse::PacketBuilder;
 use tokio_tun::Tun;
 
-use crate::{
-    bit_stream::{BitStream, Bits, BitsCompatible},
-    byte_object::ByteObject,
-    ipv4_address::IPv4Address,
-    ipv4_header::IPv4Header,
-    tcp_flags::{TCP_ACK, TCP_FIN, TCP_SYN},
-    tcp_header::TcpHeader,
-};
+mod protocols;
+mod types;
 
-// mod arp_header;
-mod bit_stream;
-mod byte_object;
-// mod ether_type;
-// mod ethernet_header;
-mod ipv4_address;
-mod ipv4_header;
-// mod ipv6_address;
-// mod ipv6_header;
-// mod mac_address;
-mod tcp_flags;
-mod tcp_header;
+use crate::protocols::ip::ipv4_header::{IPv4Header};
+use crate::protocols::tcp::tcp_flags::{TCP_ACK, TCP_FIN, TCP_SYN};
+use crate::protocols::tcp::tcp_header::TcpHeader;
+use crate::types::bit_stream::{BitStream, Bits, BitsCompatible};
+use crate::protocols::ip::ipv4_address::IPv4Address;
+use crate::types::byte_object::ByteObject;
 
 #[tokio::main]
 async fn main() {

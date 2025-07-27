@@ -1,6 +1,6 @@
-use crate::bit_stream::{BitStream, Bits, BitsCompatible};
-use crate::byte_object::ByteObject;
-use crate::ipv4_address::IPv4Address;
+use crate::types::bit_stream::{BitStream, Bits, BitsCompatible};
+use crate::types::byte_object::ByteObject;
+use crate::protocols::ip::ipv4_address::IPv4Address;
 use std::fmt::{Display, Formatter};
 
 pub struct TcpHeader {

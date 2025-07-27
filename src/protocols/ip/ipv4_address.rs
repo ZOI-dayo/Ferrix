@@ -1,6 +1,6 @@
 use std::fmt::{Display, Formatter};
-use crate::bit_stream::{BitStream, Bits};
-use crate::byte_object::ByteObject;
+use crate::types::bit_stream::{BitStream, Bits};
+use crate::types::byte_object::ByteObject;
 
 #[derive(Clone)]
 pub struct IPv4Address {

@@ -4,8 +4,8 @@
 //! そのバイトストリームとの変換、表示機能を提供する。
 
 use std::fmt::{Display, Formatter};
-use crate::bit_stream::BitStream;
-use crate::byte_object::ByteObject;
+use crate::types::bit_stream::BitStream;
+use crate::types::byte_object::ByteObject;
 
 /// IPv6アドレスを表す構造体。
 ///

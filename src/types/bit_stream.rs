@@ -1,4 +1,4 @@
-use std::ops::{Index, RangeBounds};
+use std::ops::Index;
 
 pub struct BitStream {
     pub bits: Bits,
