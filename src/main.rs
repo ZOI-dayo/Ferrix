@@ -202,7 +202,7 @@ async fn send_http_response(
         seq_num + 1,
         5, // 5 * 4 = 20 bytes
         0,
-        TCP_ACK | TCP_FIN,    // ACK + FINフラグ
+        TCP_ACK,
         (seq_num + 1) as u16, // 最大ウィンドウサイズ
         0,
         &src_ip,
